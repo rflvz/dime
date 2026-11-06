@@ -16,9 +16,9 @@ cfg() {  # cfg CLAVE valor_por_defecto
   echo "${v:-$2}"
 }
 BACKEND=$(cfg DIME_BACKEND claude)
-CLAUDE_MODEL=$(cfg DIME_CLAUDE_MODEL haiku)
+CLAUDE_MODEL=$(cfg DIME_CLAUDE_MODEL sonnet)
 CODEX_MODEL=$(cfg DIME_CODEX_MODEL gpt-6-luna)
-CLAUDE_EFFORT=$(cfg DIME_CLAUDE_EFFORT auto)
+CLAUDE_EFFORT=$(cfg DIME_CLAUDE_EFFORT medium)
 CODEX_EFFORT=$(cfg DIME_CODEX_EFFORT low)
 run="terminal=false refresh=true"
 
@@ -64,7 +64,7 @@ effort_menu() {  # effort_menu motor actual niveles…
 }
 
 echo "Modelo Claude: $CLAUDE_MODEL"
-printf '%s\n' "haiku|Haiku (rápido)" "sonnet|Sonnet" "opus|Opus" "fable|Fable" \
+printf '%s\n' "haiku|Haiku (rápido)" "sonnet|Sonnet (predeterminado)" "opus|Opus" "fable|Fable" \
   | model_menu claude "$CLAUDE_MODEL"
 effort_menu claude "$CLAUDE_EFFORT" auto low medium high xhigh max
 

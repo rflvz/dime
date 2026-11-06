@@ -30,8 +30,8 @@ for _v in DIME_BACKEND DIME_CLAUDE_MODEL DIME_CLAUDE_EFFORT DIME_CODEX_MODEL DIM
   [[ -n ${(P)_v} ]] && _env_override[$_v]=${(P)_v}
 done
 DIME_BACKEND=claude
-DIME_CLAUDE_MODEL=haiku
-DIME_CLAUDE_EFFORT=          # vacío = el esfuerzo por defecto del modelo
+DIME_CLAUDE_MODEL=sonnet
+DIME_CLAUDE_EFFORT=medium   # auto = el esfuerzo por defecto del modelo
 DIME_CODEX_MODEL=gpt-6-luna
 DIME_CODEX_EFFORT=low
 DIME_TIMEOUT=45
@@ -161,7 +161,7 @@ with_timeout() { perl -e 'alarm shift; exec @ARGV or exit 127' "$DIME_TIMEOUT" "
 run_claude() {  # $1 = prompt
   [[ -x $CLAUDE_BIN ]] || { print -u2 "claude no está instalado"; return 127 }
   local -a effort=()
-  [[ -n $DIME_CLAUDE_EFFORT ]] && effort=(--effort $DIME_CLAUDE_EFFORT)
+  [[ -n $DIME_CLAUDE_EFFORT && $DIME_CLAUDE_EFFORT != auto ]] && effort=(--effort $DIME_CLAUDE_EFFORT)
   ( cd $DIME_DIR && with_timeout $CLAUDE_BIN -p --model $DIME_CLAUDE_MODEL $effort --tools "" --strict-mcp-config \
       --setting-sources "" --disable-slash-commands --no-session-persistence \
       --system-prompt "$SYSTEM_PROMPT" "$1" </dev/null )
@@ -279,7 +279,6 @@ case $1 in
     fi
     [[ $e == (low|medium|high|xhigh|max|auto) ]] || { print -u2 "uso: dime esfuerzo [claude|codex] low|medium|high|xhigh|max"; exit 2 }
     [[ $e == auto && $eng == codex ]] && { print -u2 "dime: codex necesita un nivel concreto"; exit 2 }
-    [[ $e == auto ]] && e=
     set_config DIME_${(U)eng}_EFFORT "$e"; refresh_swiftbar; print "dime: esfuerzo $eng → ${e:-auto}"; exit 0 ;;
   contexto|context)
     [[ -f $NOTES ]] || cp ${0:A:h}/contexto.ejemplo.md $NOTES 2>/dev/null || touch $NOTES

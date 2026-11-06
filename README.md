@@ -51,15 +51,15 @@ Abre una terminal nueva y prueba: escribe `ver qué proceso usa el puerto 3000` 
 
 | Motor | Cómo lo llama | Tiempo típico |
 |---|---|---|
-| Claude Code (por defecto) | `claude -p --model haiku`, sin MCP, plugins, hooks ni herramientas | ~2,5–4 s |
+| Claude Code (por defecto) | `claude -p --model sonnet --effort medium`, sin MCP, plugins, hooks ni herramientas | ~2,5–4 s |
 | ChatGPT (Codex) | `codex exec -m gpt-6-luna`, razonamiento bajo, efímero y en solo lectura | ~5 s |
 
 Si el motor elegido falla, usa el otro automáticamente. Puedes cambiar el motor, y el modelo y esfuerzo de cada uno, desde SwiftBar, con `dime backend …`, `dime modelo [claude|codex] <modelo>` y `dime esfuerzo [claude|codex] <nivel>`, o en `~/.config/dime/config`:
 
 ```sh
 DIME_BACKEND=claude          # claude | codex
-DIME_CLAUDE_MODEL=haiku
-DIME_CLAUDE_EFFORT=          # vacío = el del modelo; low | medium | high | xhigh | max
+DIME_CLAUDE_MODEL=sonnet
+DIME_CLAUDE_EFFORT=medium   # auto (el del modelo) | low | medium | high | xhigh | max
 DIME_CODEX_MODEL=gpt-6-luna
 DIME_CODEX_EFFORT=low
 DIME_TIMEOUT=45
