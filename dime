@@ -5,6 +5,8 @@
 #   dime -c "..."                                            → además lo copia al portapapeles
 #   dime on | off | toggle | status                          → activar/desactivar (lo usa SwiftBar)
 #   dime backend claude|codex                                → motor por defecto
+#   dime modelo [claude|codex] <modelo>                      → modelo de cada motor
+#   dime esfuerzo [claude|codex] low|medium|high|xhigh|max   → esfuerzo de cada motor
 #   dime contexto                                            → editar tus notas (servidores, dominios…)
 #   dime log                                                 → ver el registro
 #
@@ -24,11 +26,12 @@ LOG=$HOME/Library/Logs/dime.log
 
 # Valores por defecto (se pueden cambiar en ~/.config/dime/config)
 typeset -A _env_override=()
-for _v in DIME_BACKEND DIME_CLAUDE_MODEL DIME_CODEX_MODEL DIME_CODEX_EFFORT DIME_TIMEOUT DIME_FALLBACK DIME_VERBOSE; do
+for _v in DIME_BACKEND DIME_CLAUDE_MODEL DIME_CLAUDE_EFFORT DIME_CODEX_MODEL DIME_CODEX_EFFORT DIME_TIMEOUT DIME_FALLBACK DIME_VERBOSE; do
   [[ -n ${(P)_v} ]] && _env_override[$_v]=${(P)_v}
 done
 DIME_BACKEND=claude
 DIME_CLAUDE_MODEL=haiku
+DIME_CLAUDE_EFFORT=          # vacío = el esfuerzo por defecto del modelo
 DIME_CODEX_MODEL=gpt-6-luna
 DIME_CODEX_EFFORT=low
 DIME_TIMEOUT=45
@@ -157,7 +160,9 @@ with_timeout() { perl -e 'alarm shift; exec @ARGV or exit 127' "$DIME_TIMEOUT" "
 
 run_claude() {  # $1 = prompt
   [[ -x $CLAUDE_BIN ]] || { print -u2 "claude no está instalado"; return 127 }
-  ( cd $DIME_DIR && with_timeout $CLAUDE_BIN -p --model $DIME_CLAUDE_MODEL --tools "" --strict-mcp-config \
+  local -a effort=()
+  [[ -n $DIME_CLAUDE_EFFORT ]] && effort=(--effort $DIME_CLAUDE_EFFORT)
+  ( cd $DIME_DIR && with_timeout $CLAUDE_BIN -p --model $DIME_CLAUDE_MODEL $effort --tools "" --strict-mcp-config \
       --setting-sources "" --disable-slash-commands --no-session-persistence \
       --system-prompt "$SYSTEM_PROMPT" "$1" </dev/null )
 }
@@ -239,7 +244,7 @@ translate() {  # $1 = petición → imprime comando (stdout) y explicación en E
 }
 
 usage() {
-  sed -n '2,13p' $0 | sed 's/^# \{0,1\}//'
+  sed -n '2,15p' $ZSH_ARGZERO | sed 's/^# \{0,1\}//'
 }
 
 status_line() {
@@ -250,11 +255,32 @@ case $1 in
   on|activar)     rm -f $OFF_FLAG; refresh_swiftbar; print "dime: activado"; exit 0 ;;
   off|desactivar) touch $OFF_FLAG; refresh_swiftbar; print "dime: desactivado"; exit 0 ;;
   toggle)         if [[ -e $OFF_FLAG ]]; then rm -f $OFF_FLAG; else touch $OFF_FLAG; fi; refresh_swiftbar; print "dime: $(status_line)"; exit 0 ;;
-  status|estado)  print "dime: $(status_line), motor $DIME_BACKEND (claude=$DIME_CLAUDE_MODEL, codex=$DIME_CODEX_MODEL)"; exit 0 ;;
+  status|estado)  print "dime: $(status_line), motor $DIME_BACKEND (claude=$DIME_CLAUDE_MODEL/${DIME_CLAUDE_EFFORT:-auto}, codex=$DIME_CODEX_MODEL/$DIME_CODEX_EFFORT)"; exit 0 ;;
   is-on)          [[ ! -e $OFF_FLAG ]]; exit $? ;;
   backend|motor)
     [[ $2 == (claude|codex) ]] || { print -u2 "uso: dime backend claude|codex"; exit 2 }
     set_config DIME_BACKEND $2; refresh_swiftbar; print "dime: motor $2"; exit 0 ;;
+  modelo|model)
+    # dime modelo claude|codex <modelo>   → fija el modelo de ese motor
+    # dime modelo <modelo>                → fija el modelo del motor activo
+    local eng=$DIME_BACKEND m=$2
+    [[ $2 == (claude|codex) ]] && { eng=$2; m=$3 }
+    if [[ -z $m ]]; then
+      print "dime: claude=$DIME_CLAUDE_MODEL, codex=$DIME_CODEX_MODEL"; exit 0
+    fi
+    [[ $m == [A-Za-z0-9._:-]## ]] || { print -u2 "dime: nombre de modelo no válido: $m"; exit 2 }
+    set_config DIME_${(U)eng}_MODEL $m; refresh_swiftbar; print "dime: modelo $eng → $m"; exit 0 ;;
+  esfuerzo|effort)
+    # dime esfuerzo [claude|codex] low|medium|high|xhigh|max   (claude acepta además «auto» = el del modelo)
+    local eng=$DIME_BACKEND e=$2
+    [[ $2 == (claude|codex) ]] && { eng=$2; e=$3 }
+    if [[ -z $e ]]; then
+      print "dime: esfuerzo claude=${DIME_CLAUDE_EFFORT:-auto}, codex=$DIME_CODEX_EFFORT"; exit 0
+    fi
+    [[ $e == (low|medium|high|xhigh|max|auto) ]] || { print -u2 "uso: dime esfuerzo [claude|codex] low|medium|high|xhigh|max"; exit 2 }
+    [[ $e == auto && $eng == codex ]] && { print -u2 "dime: codex necesita un nivel concreto"; exit 2 }
+    [[ $e == auto ]] && e=
+    set_config DIME_${(U)eng}_EFFORT "$e"; refresh_swiftbar; print "dime: esfuerzo $eng → ${e:-auto}"; exit 0 ;;
   contexto|context)
     [[ -f $NOTES ]] || cp ${0:A:h}/contexto.ejemplo.md $NOTES 2>/dev/null || touch $NOTES
     ${VISUAL:-${EDITOR:-open -t}} $NOTES; exit 0 ;;

@@ -54,11 +54,12 @@ Abre una terminal nueva y prueba: escribe `ver qué proceso usa el puerto 3000` 
 | Claude Code (por defecto) | `claude -p --model haiku`, sin MCP, plugins, hooks ni herramientas | ~2,5–4 s |
 | ChatGPT (Codex) | `codex exec -m gpt-6-luna`, razonamiento bajo, efímero y en solo lectura | ~5 s |
 
-Si el motor elegido falla, usa el otro automáticamente. Puedes cambiarlo desde SwiftBar, con `dime backend …` o en `~/.config/dime/config`:
+Si el motor elegido falla, usa el otro automáticamente. Puedes cambiar el motor, y el modelo y esfuerzo de cada uno, desde SwiftBar, con `dime backend …`, `dime modelo [claude|codex] <modelo>` y `dime esfuerzo [claude|codex] <nivel>`, o en `~/.config/dime/config`:
 
 ```sh
 DIME_BACKEND=claude          # claude | codex
 DIME_CLAUDE_MODEL=haiku
+DIME_CLAUDE_EFFORT=          # vacío = el del modelo; low | medium | high | xhigh | max
 DIME_CODEX_MODEL=gpt-6-luna
 DIME_CODEX_EFFORT=low
 DIME_TIMEOUT=45
@@ -74,7 +75,7 @@ En cada petición se envían el sistema, el directorio, el repo git (rama, origi
 
 ## SwiftBar
 
-`swiftbar/dime.30s.sh` añade un punto pequeño y monocromo a la barra de menú: relleno cuando está activado y hueco cuando no. El menú es solo texto: activar o desactivar, elegir motor, notas y registro. El cambio vale al momento en todas las terminales abiertas, sin reiniciarlas. Con dime desactivado, Ctrl+G vuelve a hacer lo normal de zsh.
+`swiftbar/dime.30s.sh` añade un punto pequeño y monocromo a la barra de menú: relleno cuando está activado y hueco cuando no. El menú es solo texto: activar o desactivar, elegir motor, elegir modelo y esfuerzo de Claude y de Codex (los de Codex salen de `~/.codex/models_cache.json`, así aparecen los que tiene tu cuenta), notas y registro. El cambio vale al momento en todas las terminales abiertas, sin reiniciarlas. Con dime desactivado, Ctrl+G vuelve a hacer lo normal de zsh.
 
 ## Notas
 
