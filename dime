@@ -2,7 +2,7 @@
 # dime — de lenguaje natural a comando de terminal, con Claude Code o ChatGPT (Codex).
 #
 #   dime "hacer un curl a ejemplo.com para ver si responde"   → imprime el comando
-#   dime -c "…"                                              → además lo copia al portapapeles
+#   dime -c "..."                                            → además lo copia al portapapeles
 #   dime on | off | toggle | status                          → activar/desactivar (lo usa SwiftBar)
 #   dime backend claude|codex                                → motor por defecto
 #   dime contexto                                            → editar tus notas (servidores, dominios…)
@@ -24,7 +24,7 @@ LOG=$HOME/Library/Logs/dime.log
 
 # Valores por defecto (se pueden cambiar en ~/.config/dime/config)
 typeset -A _env_override=()
-for _v in DIME_BACKEND DIME_CLAUDE_MODEL DIME_CODEX_MODEL DIME_CODEX_EFFORT DIME_TIMEOUT DIME_FALLBACK; do
+for _v in DIME_BACKEND DIME_CLAUDE_MODEL DIME_CODEX_MODEL DIME_CODEX_EFFORT DIME_TIMEOUT DIME_FALLBACK DIME_VERBOSE; do
   [[ -n ${(P)_v} ]] && _env_override[$_v]=${(P)_v}
 done
 DIME_BACKEND=claude
@@ -33,6 +33,7 @@ DIME_CODEX_MODEL=gpt-6-luna
 DIME_CODEX_EFFORT=low
 DIME_TIMEOUT=45
 DIME_FALLBACK=1
+DIME_VERBOSE=0      # 1 = muestra explicación, motor y tiempo bajo la línea
 [[ -f $CONFIG ]] && source $CONFIG
 for _v in ${(k)_env_override}; do typeset -g $_v=${_env_override[$_v]}; done   # el entorno manda
 
@@ -142,7 +143,7 @@ build_prompt() {
   print
   if [[ -n $DIME_PREV ]]; then
     print -r -- "Propuestas que el usuario YA HA DESCARTADO (prohibido repetirlas, ni siquiera con cambios mínimos de flags):"
-    print -r -- "$DIME_PREV" | sed 's/^/  ✗ /'
+    print -r -- "$DIME_PREV" | sed 's/^/  - /'
     print
     print -r -- "Petición: $req"
     print -r -- "Da una ALTERNATIVA claramente distinta: otra herramienta (p. ej. lsof → netstat/ps/nc, curl → xh/httpie/wget), otro enfoque o una versión más completa que aporte más información."
@@ -197,11 +198,11 @@ parse_reply() {  # $1 = texto → globals CMD, EXPL
 danger_note() {
   local c=$1
   if [[ $c == *(rm\ -rf|rm\ -fr|rm\ -r\ |mkfs|dd\ if=|diskutil\ erase|\>\ /dev/disk|chmod\ -R\ 777|DROP\ TABLE|DROP\ DATABASE|TRUNCATE|--force-with-lease|push\ --force|push\ -f|reset\ --hard|clean\ -fd|docker\ system\ prune|volume\ rm|kubectl\ delete|terraform\ destroy|vercel\ remove|vercel\ rm|killall|kill\ -9)* ]]; then
-    print -r -- "⚠️  destructivo, revísalo antes de pulsar Enter"
+    print -r -- "revisar: destructivo"
   elif [[ $c == *(vercel(|\ *)\ --prod*|vercel\ promote|vercel\ rollback|vercel\ deploy\ --prod|deploy\ --prod|deploy\ prod|db\ push|migrate\ deploy|railway\ up|railway\ redeploy|fly\ deploy|flyctl\ deploy|wrangler\ deploy|wrangler\ publish|netlify\ deploy\ --prod|firebase\ deploy|kubectl\ apply|kubectl\ rollout|helm\ upgrade|helm\ install|terraform\ apply|npm\ publish|pnpm\ publish|git\ push\ origin\ main|git\ push\ origin\ master|docker\ push)* ]]; then
-    print -r -- "🚀 afecta a producción, revísalo"
+    print -r -- "revisar: producción"
   elif [[ $c == *sudo\ * ]]; then
-    print -r -- "🔐 usa sudo"
+    print -r -- "revisar: sudo"
   fi
 }
 
@@ -249,23 +250,24 @@ case $1 in
   on|activar)     rm -f $OFF_FLAG; refresh_swiftbar; print "dime: activado"; exit 0 ;;
   off|desactivar) touch $OFF_FLAG; refresh_swiftbar; print "dime: desactivado"; exit 0 ;;
   toggle)         if [[ -e $OFF_FLAG ]]; then rm -f $OFF_FLAG; else touch $OFF_FLAG; fi; refresh_swiftbar; print "dime: $(status_line)"; exit 0 ;;
-  status|estado)  print "dime: $(status_line) · motor $DIME_BACKEND (claude=$DIME_CLAUDE_MODEL, codex=$DIME_CODEX_MODEL)"; exit 0 ;;
+  status|estado)  print "dime: $(status_line), motor $DIME_BACKEND (claude=$DIME_CLAUDE_MODEL, codex=$DIME_CODEX_MODEL)"; exit 0 ;;
   is-on)          [[ ! -e $OFF_FLAG ]]; exit $? ;;
   backend|motor)
     [[ $2 == (claude|codex) ]] || { print -u2 "uso: dime backend claude|codex"; exit 2 }
-    set_config DIME_BACKEND $2; refresh_swiftbar; print "dime: motor → $2"; exit 0 ;;
+    set_config DIME_BACKEND $2; refresh_swiftbar; print "dime: motor $2"; exit 0 ;;
   contexto|context)
     [[ -f $NOTES ]] || cp ${0:A:h}/contexto.ejemplo.md $NOTES 2>/dev/null || touch $NOTES
     ${VISUAL:-${EDITOR:-open -t}} $NOTES; exit 0 ;;
   log)            touch $LOG; tail -40 $LOG; exit 0 ;;
   -h|--help|help|"") usage; exit 0 ;;
   --zle)
-    # Modo widget: stdout = comando; stderr = mensaje para mostrar bajo la línea
+    # Modo widget: stdout = comando; stderr = mensaje bajo la línea (vacío salvo avisos o modo verbose)
     shift; [[ $1 == -- ]] && shift
     if ! translate "$*"; then print -u2 -r -- "dime: $ERROR"; exit 1; fi
     print -r -- "$CMD"
-    local note=$(danger_note "$CMD")
-    print -u2 -r -- "✨ ${EXPL:-listo}  · ${BACKEND_USED} ${ELAPSED}s${FALLBACK_REASON:+ (respaldo: $FALLBACK_REASON)}${note:+${NL}$note}"
+    local note=$(danger_note "$CMD") info=
+    (( DIME_VERBOSE )) && info="${EXPL:+$EXPL · }${BACKEND_USED} ${ELAPSED}s${FALLBACK_REASON:+ (respaldo: $FALLBACK_REASON)}"
+    [[ -n $info$note ]] && print -u2 -r -- "${info}${info:+${note:+  }}${note}"
     exit 0 ;;
 esac
 
@@ -275,7 +277,7 @@ local copy=0
 [[ $1 == -- ]] && shift
 if ! translate "$*"; then print -u2 -r -- "dime: $ERROR"; exit 1; fi
 print -r -- "$CMD"
-[[ -t 2 ]] && print -u2 -P -r -- "%F{8}${EXPL} · ${BACKEND_USED} ${ELAPSED}s%f"
+(( DIME_VERBOSE )) && [[ -t 2 ]] && print -u2 -r -- "${EXPL:+$EXPL · }${BACKEND_USED} ${ELAPSED}s"
 note=$(danger_note "$CMD"); [[ -n $note ]] && print -u2 -r -- "$note"
 (( copy )) && print -rn -- "$CMD" | pbcopy
 exit 0

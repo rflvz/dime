@@ -4,7 +4,7 @@
 # <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
 # <swiftbar.hideDisablePlugin>true</swiftbar.hideDisablePlugin>
 # <swiftbar.hideSwiftBar>true</swiftbar.hideSwiftBar>
-# dime en la barra de menú: activar/desactivar el «lenguaje natural → comando» de la terminal
+# dime en la barra de menú. Discreto: un punto pequeño, relleno = activado, hueco = desactivado.
 DIME="${DIME_BIN:-$HOME/.local/bin/dime}"
 [ -x "$DIME" ] || DIME=$(command -v dime)
 DIR="$HOME/.config/dime"
@@ -13,32 +13,21 @@ CONFIG="$DIR/config"
 BACKEND=claude
 [ -f "$CONFIG" ] && BACKEND=$(sed -n 's/^DIME_BACKEND=//p' "$CONFIG" | tail -1)
 [ -z "$BACKEND" ] && BACKEND=claude
+run="terminal=false refresh=true"
 
 if [ ! -e "$DIR/desactivado" ]; then
-  echo ":wand.and.sparkles: | sfsize=14"
+  echo ":circle.fill: | sfsize=6"
   echo "---"
-  echo "dime: activado | sfimage=circle.fill sfcolor=#34C759"
-  echo "Ctrl+G o «¿texto» + Enter en la terminal | size=11 color=gray"
-  echo "---"
-  echo "Desactivar | bash='$DIME' param1=off terminal=false refresh=true sfimage=stop.fill"
+  echo "Activado | bash='$DIME' param1=off $run checked=true"
 else
-  echo ":wand.and.sparkles.inverse: | sfsize=14 color=gray"
+  echo ":circle: | sfsize=6"
   echo "---"
-  echo "dime: desactivado | sfimage=circle"
-  echo "---"
-  echo "Activar | bash='$DIME' param1=on terminal=false refresh=true sfimage=play.fill"
+  echo "Activado | bash='$DIME' param1=on $run"
 fi
 echo "---"
-echo "Motor"
-if [ "$BACKEND" = "codex" ]; then
-  echo "--Claude Code | bash='$DIME' param1=backend param2=claude terminal=false refresh=true sfimage=circle"
-  echo "--ChatGPT (Codex) | bash='$DIME' param1=backend param2=codex terminal=false refresh=true sfimage=checkmark.circle.fill"
-  echo "Motor: ChatGPT (Codex) | size=11 color=gray"
-else
-  echo "--Claude Code | bash='$DIME' param1=backend param2=claude terminal=false refresh=true sfimage=checkmark.circle.fill"
-  echo "--ChatGPT (Codex) | bash='$DIME' param1=backend param2=codex terminal=false refresh=true sfimage=circle"
-  echo "Motor: Claude Code | size=11 color=gray"
-fi
+[ "$BACKEND" = "codex" ] && c1="" c2="checked=true" || c1="checked=true" c2=""
+echo "Claude Code | bash='$DIME' param1=backend param2=claude $run $c1"
+echo "ChatGPT (Codex) | bash='$DIME' param1=backend param2=codex $run $c2"
 echo "---"
-echo "Editar mis notas de contexto | bash=/usr/bin/open param1=-t param2=$DIR/contexto.md terminal=false sfimage=note.text"
-echo "Ver registro | bash=/usr/bin/open param1=-t param2=$HOME/Library/Logs/dime.log terminal=false sfimage=doc.text"
+echo "Notas de contexto | bash=/usr/bin/open param1=-t param2=$DIR/contexto.md terminal=false"
+echo "Registro | bash=/usr/bin/open param1=-t param2=$HOME/Library/Logs/dime.log terminal=false"

@@ -1,11 +1,10 @@
-# dime ✨
+# dime
 
 **Lenguaje natural → comando, en la misma línea de tu terminal.** Escribes lo que quieres hacer, pulsas **Ctrl+G** y la línea se sustituye por el comando. Nunca se ejecuta solo: lo revisas y pulsas Enter.
 
 ```
-❯ comprobar que ejemplo.com responde y cuánto tarda          ← Ctrl+G
-❯ curl -sS -L -o /dev/null -w "HTTP %{http_code} | total %{time_total}s\n" https://ejemplo.com
-  ✨ Muestra el código HTTP y el tiempo total · claude 2.7s
+$ comprobar que ejemplo.com responde y cuánto tarda          <- Ctrl+G
+$ curl -sS -L -o /dev/null -w "HTTP %{http_code} | total %{time_total}s\n" https://ejemplo.com
 ```
 
 Usa las licencias que ya tienes: **Claude Code** (`claude -p`) o **ChatGPT** a través de **Codex CLI** (`codex exec`). No necesita claves de API. Se activa y desactiva desde la barra de menú con **SwiftBar**.
@@ -21,8 +20,7 @@ Está pensado para gestionar despliegues y servidores: el modelo ve el contexto 
 | `¿texto` + **Enter** | lo mismo con el prefijo `¿` |
 | **Ctrl+_** | deshacer y volver a tu texto |
 
-Debajo de la línea verás una explicación corta, el motor usado, el tiempo que ha tardado y avisos que se calculan en local, sin depender del modelo:
-⚠️ destructivo · 🚀 despliegue o producción · 🔐 sudo.
+Es discreto: mientras piensa solo aparece `…` y, cuando termina, la línea cambia sin más mensajes. Debajo solo saldrá un aviso de texto si el comando es delicado. Esos avisos se calculan en local, sin depender del modelo: `revisar: destructivo`, `revisar: producción` o `revisar: sudo`. Con `DIME_VERBOSE=1` muestra además una explicación breve, el motor usado y el tiempo.
 
 También funciona como comando normal:
 
@@ -65,6 +63,7 @@ DIME_CODEX_MODEL=gpt-6-luna
 DIME_CODEX_EFFORT=low
 DIME_TIMEOUT=45
 DIME_FALLBACK=1
+DIME_VERBOSE=0               # 1 = explicación, motor y tiempo bajo la línea
 ```
 
 ## Qué contexto se envía
@@ -75,7 +74,7 @@ En cada petición se envían el sistema, el directorio, el repo git (rama, origi
 
 ## SwiftBar
 
-`swiftbar/dime.30s.sh` añade un icono de varita a la barra de menú (gris cuando está desactivado). Desde ahí puedes activar o desactivar dime, elegir motor, editar las notas y abrir el registro. El cambio vale al momento en todas las terminales abiertas, sin reiniciarlas. Con dime desactivado, Ctrl+G vuelve a hacer lo normal de zsh.
+`swiftbar/dime.30s.sh` añade un punto pequeño y monocromo a la barra de menú: relleno cuando está activado y hueco cuando no. El menú es solo texto: activar o desactivar, elegir motor, notas y registro. El cambio vale al momento en todas las terminales abiertas, sin reiniciarlas. Con dime desactivado, Ctrl+G vuelve a hacer lo normal de zsh.
 
 ## Notas
 

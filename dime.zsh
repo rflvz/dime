@@ -31,7 +31,7 @@ _dime_convert() {
     _DIME_REJECTED=
   fi
 
-  zle -M "✨ dime: pensando${prev:+ una alternativa}…"
+  zle -M "…"
   zle -R
   local errf=$(mktemp -t dime-zle) out rc
   out=$(DIME_PREV=$prev "$DIME_BIN" --zle -- "$req" 2>$errf </dev/null)
@@ -45,7 +45,7 @@ _dime_convert() {
   _DIME_LAST_REQ=$req _DIME_LAST_OUT=$out
   BUFFER=$out
   CURSOR=${#BUFFER}
-  zle -M "$msg"
+  zle -M "$msg"   # vacío salvo avisos (revisar: …) o DIME_VERBOSE=1
 }
 
 # Ctrl+G
