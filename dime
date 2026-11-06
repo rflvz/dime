@@ -7,6 +7,7 @@
 #   dime backend claude|codex                                → motor por defecto
 #   dime modelo [claude|codex] <modelo>                      → modelo de cada motor
 #   dime esfuerzo [claude|codex] low|medium|high|xhigh|max   → esfuerzo de cada motor
+#   dime explorar on|off                                     → que Claude busque rutas antes de responder
 #   dime contexto                                            → editar tus notas (servidores, dominios…)
 #   dime log                                                 → ver el registro
 #
@@ -26,7 +27,7 @@ LOG=$HOME/Library/Logs/dime.log
 
 # Valores por defecto (se pueden cambiar en ~/.config/dime/config)
 typeset -A _env_override=()
-for _v in DIME_BACKEND DIME_CLAUDE_MODEL DIME_CLAUDE_EFFORT DIME_CODEX_MODEL DIME_CODEX_EFFORT DIME_TIMEOUT DIME_FALLBACK DIME_VERBOSE; do
+for _v in DIME_BACKEND DIME_CLAUDE_MODEL DIME_CLAUDE_EFFORT DIME_CODEX_MODEL DIME_CODEX_EFFORT DIME_EXPLORE DIME_PROJECT_DIRS DIME_TIMEOUT DIME_FALLBACK DIME_VERBOSE; do
   [[ -n ${(P)_v} ]] && _env_override[$_v]=${(P)_v}
 done
 DIME_BACKEND=claude
@@ -34,6 +35,8 @@ DIME_CLAUDE_MODEL=sonnet
 DIME_CLAUDE_EFFORT=medium   # auto = el esfuerzo por defecto del modelo
 DIME_CODEX_MODEL=gpt-6-luna
 DIME_CODEX_EFFORT=low
+DIME_EXPLORE=1      # 1 = Claude puede buscar rutas por nombre (Glob) antes de responder
+DIME_PROJECT_DIRS='~/code'   # carpetas cuyos proyectos se listan en el contexto (separadas por espacios)
 DIME_TIMEOUT=45
 DIME_FALLBACK=1
 DIME_VERBOSE=0      # 1 = muestra explicación, motor y tiempo bajo la línea
@@ -108,6 +111,19 @@ gather_context() {
   done
   print -r -- "- CLIs instaladas: ${(j: :)clis}"
 
+  # Mapa de proyectos: solo nombres de carpetas (dos niveles), para que acierte rutas sin buscar
+  local base sub
+  local -a subs
+  for base in ${(z)DIME_PROJECT_DIRS}; do
+    base=${~base}
+    [[ -d $base ]] || continue
+    print -r -- "- Carpetas de proyectos en $base:"
+    for sub in $base/*(/N); do
+      subs=( $sub/*(/N:t) )
+      if (( ${#subs} )); then print -r -- "    ${sub:t}/: ${(j: :)subs[1,60]}"; else print -r -- "    ${sub:t}/"; fi
+    done
+  done
+
   local -a hosts
   hosts=( ${(f)"$(cat $HOME/.ssh/config $HOME/.ssh/config.d/*(N) 2>/dev/null | awk 'tolower($1)=="host"{for(i=2;i<=NF;i++) if($i!~/[*?!]/) print $i}')"} )
   (( ${#hosts} )) && print -r -- "- Hosts SSH configurados: ${(j: :)hosts[1,30]}"
@@ -155,16 +171,24 @@ build_prompt() {
   print -r -- "Petición: $req"
 }
 
+EXPLORE_PROMPT="Tienes la herramienta Glob, que busca archivos por nombre dentro de $HOME (no lee su contenido). Antes de buscar, mira el mapa de «Carpetas de proyectos» del contexto: casi siempre basta para dar la ruta absoluta de un proyecto, sin usar Glob. Ten en cuenta que los nombres pueden llevar _ o - en vez de espacios (\"the phone space mcp\" → the_phone_space-mcp). Usa Glob SOLO si necesitas una ruta que no está en el contexto (un archivo o subcarpeta concreta dentro de un proyecto, un log…); si no, responde directamente. Reglas de Glob: pasa siempre path lo más concreto posible (la carpeta del proyecto, o $HOME/Library/Logs para logs), nunca $HOME entero; nada de ** desde carpetas grandes; como mucho 2 búsquedas. Glob solo devuelve archivos: para localizar una carpeta busca un archivo dentro. Usa en el comando la ruta real que encuentres; si no la encuentras, pon un marcador como <RUTA>. Tu respuesta final sigue exactamente el formato indicado."
+
 # Ejecuta un comando con límite de tiempo (macOS no trae timeout)
 with_timeout() { perl -e 'alarm shift; exec @ARGV or exit 127' "$DIME_TIMEOUT" "$@" }
 
 run_claude() {  # $1 = prompt
   [[ -x $CLAUDE_BIN ]] || { print -u2 "claude no está instalado"; return 127 }
-  local -a effort=()
+  local -a effort=() tools=(--tools "")
+  local sys=$SYSTEM_PROMPT
   [[ -n $DIME_CLAUDE_EFFORT && $DIME_CLAUDE_EFFORT != auto ]] && effort=(--effort $DIME_CLAUDE_EFFORT)
-  ( cd $DIME_DIR && with_timeout $CLAUDE_BIN -p --model $DIME_CLAUDE_MODEL $effort --tools "" --strict-mcp-config \
+  if (( DIME_EXPLORE )); then
+    # Solo Glob: busca rutas por nombre en el HOME, nunca lee contenido. dontAsk rechaza todo lo demás.
+    tools=(--tools Glob --permission-mode dontAsk --add-dir $HOME)
+    sys+=$NL$NL$EXPLORE_PROMPT
+  fi
+  ( cd $DIME_DIR && with_timeout $CLAUDE_BIN -p --model $DIME_CLAUDE_MODEL $effort $tools --strict-mcp-config \
       --setting-sources "" --disable-slash-commands --no-session-persistence \
-      --system-prompt "$SYSTEM_PROMPT" "$1" </dev/null )
+      --system-prompt "$sys" "$1" </dev/null )
 }
 
 run_codex() {  # $1 = prompt
@@ -244,7 +268,7 @@ translate() {  # $1 = petición → imprime comando (stdout) y explicación en E
 }
 
 usage() {
-  sed -n '2,15p' $ZSH_ARGZERO | sed 's/^# \{0,1\}//'
+  sed -n '2,16p' $ZSH_ARGZERO | sed 's/^# \{0,1\}//'
 }
 
 status_line() {
@@ -270,6 +294,14 @@ case $1 in
     fi
     [[ $m == [A-Za-z0-9._:-]## ]] || { print -u2 "dime: nombre de modelo no válido: $m"; exit 2 }
     set_config DIME_${(U)eng}_MODEL $m; refresh_swiftbar; print "dime: modelo $eng → $m"; exit 0 ;;
+  explorar|explore)
+    case $2 in
+      on|si|sí|1)  set_config DIME_EXPLORE 1 ;;
+      off|no|0)    set_config DIME_EXPLORE 0 ;;
+      "")          print "dime: buscar rutas $( (( DIME_EXPLORE )) && print activado || print desactivado)"; exit 0 ;;
+      *)           print -u2 "uso: dime explorar on|off"; exit 2 ;;
+    esac
+    refresh_swiftbar; print "dime: buscar rutas $2"; exit 0 ;;
   esfuerzo|effort)
     # dime esfuerzo [claude|codex] low|medium|high|xhigh|max   (claude acepta además «auto» = el del modelo)
     local eng=$DIME_BACKEND e=$2

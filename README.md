@@ -64,18 +64,30 @@ DIME_CODEX_MODEL=gpt-6-luna
 DIME_CODEX_EFFORT=low
 DIME_TIMEOUT=45
 DIME_FALLBACK=1
+DIME_EXPLORE=1               # 1 = Claude puede buscar rutas por nombre antes de responder
+DIME_PROJECT_DIRS='~/code'   # carpetas cuyos proyectos se listan en el contexto
 DIME_VERBOSE=0               # 1 = explicación, motor y tiempo bajo la línea
 ```
 
 ## Qué contexto se envía
 
-En cada petición se envían el sistema, el directorio, el repo git (rama, origin y número de cambios), los **nombres** de los archivos de despliegue, los scripts de `package.json` y el gestor de paquetes, los objetivos de `make`, la lista de herramientas de terminal instaladas, los hosts de `~/.ssh/config` y tus notas (`~/.config/dime/contexto.md` y `.dime.md` en la raíz de cada repo). **Nunca se envía el contenido de `.env`** ni ningún secreto. No escribas contraseñas en las notas.
+En cada petición se envían el sistema, el directorio, el repo git (rama, origin y número de cambios), los **nombres** de los archivos de despliegue, los scripts de `package.json` y el gestor de paquetes, los objetivos de `make`, la lista de herramientas de terminal instaladas, los **nombres** de las carpetas de proyectos de `DIME_PROJECT_DIRS` (dos niveles), los hosts de `~/.ssh/config` y tus notas (`~/.config/dime/contexto.md` y `.dime.md` en la raíz de cada repo). **Nunca se envía el contenido de `.env`** ni ningún secreto. No escribas contraseñas en las notas.
 
 > El texto que escribes y ese contexto llegan al proveedor del motor (Anthropic u OpenAI), igual que cuando usas Claude Code o Codex directamente.
 
+## Búsqueda de rutas
+
+Con Claude Code, dime puede buscar rutas por su cuenta antes de responder, sin que lo veas. Si pides «abre en vscode el proyecto concoco» o «arranca el mcp de the phone space», el comando sale con la ruta real (`code /Users/…/trabajo/concoco`, `cd …/the_phone_space-mcp/web && pnpm dev`) y no con un `<RUTA>`.
+
+- Casi siempre le basta el mapa de carpetas de proyectos del contexto, así que no tarda más.
+- Si le falta algo (un archivo concreto, un log en `~/Library/Logs`…), usa **solo la herramienta Glob** de Claude Code, que busca archivos **por nombre** dentro de tu carpeta personal. No tiene `Bash`, `Read` ni `Grep`, y se lanza con `--permission-mode dontAsk`, así que no puede ejecutar comandos, leer el contenido de ningún archivo ni escribir nada. Esas búsquedas añaden unos segundos.
+- Se activa y desactiva con `dime explorar on|off` o desde SwiftBar («Buscar rutas antes de responder»).
+- No se dan comandos de shell de solo lectura (`ls`, `find`…) a propósito: Claude Code aprueba por su cuenta lecturas como `cat` o `grep -r` dentro de las carpetas permitidas, y así podría acabar leyendo un `.env`.
+- Codex no busca: su sandbox de solo lectura no impide leer contenido, así que no se le invita a explorar.
+
 ## SwiftBar
 
-`swiftbar/dime.30s.sh` añade un punto pequeño y monocromo a la barra de menú: relleno cuando está activado y hueco cuando no. El menú es solo texto: activar o desactivar, elegir motor, elegir modelo y esfuerzo de Claude y de Codex (los de Codex salen de `~/.codex/models_cache.json`, así aparecen los que tiene tu cuenta), notas y registro. El cambio vale al momento en todas las terminales abiertas, sin reiniciarlas. Con dime desactivado, Ctrl+G vuelve a hacer lo normal de zsh.
+`swiftbar/dime.30s.sh` añade un punto pequeño y monocromo a la barra de menú: relleno cuando está activado y hueco cuando no. El menú es solo texto: activar o desactivar, elegir motor, elegir modelo y esfuerzo de Claude y de Codex, activar o desactivar la búsqueda de rutas (los de Codex salen de `~/.codex/models_cache.json`, así aparecen los que tiene tu cuenta), notas y registro. El cambio vale al momento en todas las terminales abiertas, sin reiniciarlas. Con dime desactivado, Ctrl+G vuelve a hacer lo normal de zsh.
 
 ## Notas
 

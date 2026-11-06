@@ -20,6 +20,7 @@ CLAUDE_MODEL=$(cfg DIME_CLAUDE_MODEL sonnet)
 CODEX_MODEL=$(cfg DIME_CODEX_MODEL gpt-6-luna)
 CLAUDE_EFFORT=$(cfg DIME_CLAUDE_EFFORT medium)
 CODEX_EFFORT=$(cfg DIME_CODEX_EFFORT low)
+EXPLORE=$(cfg DIME_EXPLORE 1)
 run="terminal=false refresh=true"
 
 if [ ! -e "$DIR/desactivado" ]; then
@@ -67,6 +68,11 @@ echo "Modelo Claude: $CLAUDE_MODEL"
 printf '%s\n' "haiku|Haiku (rápido)" "sonnet|Sonnet (predeterminado)" "opus|Opus" "fable|Fable" \
   | model_menu claude "$CLAUDE_MODEL"
 effort_menu claude "$CLAUDE_EFFORT" auto low medium high xhigh max
+if [ "$EXPLORE" = 1 ]; then
+  echo "Buscar rutas antes de responder | bash='$DIME' param1=explorar param2=off $run checked=true"
+else
+  echo "Buscar rutas antes de responder | bash='$DIME' param1=explorar param2=on $run"
+fi
 
 echo "Modelo Codex: $CODEX_MODEL"
 CACHE="$HOME/.codex/models_cache.json"
