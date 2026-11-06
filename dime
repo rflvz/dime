@@ -1,0 +1,281 @@
+#!/bin/zsh
+# dime — de lenguaje natural a comando de terminal, con Claude Code o ChatGPT (Codex).
+#
+#   dime "hacer un curl a ejemplo.com para ver si responde"   → imprime el comando
+#   dime -c "…"                                              → además lo copia al portapapeles
+#   dime on | off | toggle | status                          → activar/desactivar (lo usa SwiftBar)
+#   dime backend claude|codex                                → motor por defecto
+#   dime contexto                                            → editar tus notas (servidores, dominios…)
+#   dime log                                                 → ver el registro
+#
+# En la terminal (dime.zsh): escribe lo que quieres y pulsa Ctrl+G, o empieza la línea por «¿»
+# y pulsa Enter. La línea se sustituye por el comando; nunca se ejecuta sola.
+emulate -L zsh
+setopt extended_glob pipe_fail
+zmodload zsh/datetime
+NL=$'\n'
+
+DIME_DIR=${DIME_DIR:-$HOME/.config/dime}
+CONFIG=$DIME_DIR/config
+OFF_FLAG=$DIME_DIR/desactivado
+NOTES=$DIME_DIR/contexto.md
+LOG=$HOME/Library/Logs/dime.log
+[[ -d $DIME_DIR ]] || mkdir -p $DIME_DIR
+
+# Valores por defecto (se pueden cambiar en ~/.config/dime/config)
+typeset -A _env_override=()
+for _v in DIME_BACKEND DIME_CLAUDE_MODEL DIME_CODEX_MODEL DIME_CODEX_EFFORT DIME_TIMEOUT DIME_FALLBACK; do
+  [[ -n ${(P)_v} ]] && _env_override[$_v]=${(P)_v}
+done
+DIME_BACKEND=claude
+DIME_CLAUDE_MODEL=haiku
+DIME_CODEX_MODEL=gpt-6-luna
+DIME_CODEX_EFFORT=low
+DIME_TIMEOUT=45
+DIME_FALLBACK=1
+[[ -f $CONFIG ]] && source $CONFIG
+for _v in ${(k)_env_override}; do typeset -g $_v=${_env_override[$_v]}; done   # el entorno manda
+
+CLAUDE_BIN=${commands[claude]:-$HOME/.local/bin/claude}
+CODEX_BIN=${commands[codex]:-/opt/homebrew/bin/codex}
+
+refresh_swiftbar() { pgrep -xq SwiftBar && open -g "swiftbar://refreshplugin?name=dime" 2>/dev/null; true }
+
+set_config() {  # set_config CLAVE valor
+  local key=$1 val=$2
+  touch $CONFIG
+  if grep -q "^$key=" $CONFIG; then
+    sed -i '' "s|^$key=.*|$key=$val|" $CONFIG
+  else
+    print -r -- "$key=$val" >> $CONFIG
+  fi
+}
+
+# ───────────────────────── Contexto que ve el modelo ─────────────────────────
+# Solo nombres y estructura: nunca contenido de .env ni valores secretos.
+gather_context() {
+  local root d f name
+  print -r -- "- Sistema: macOS $(sw_vers -productVersion 2>/dev/null) $(uname -m), shell zsh, utilidades BSD + Homebrew"
+  print -r -- "- Directorio actual: $PWD"
+  root=$(git rev-parse --show-toplevel 2>/dev/null)
+  if [[ -n $root ]]; then
+    print -r -- "- Repo git: $root · rama $(git branch --show-current 2>/dev/null) · origin $(git remote get-url origin 2>/dev/null || print ninguno)"
+    local dirty=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+    print -r -- "- Cambios sin commit: $dirty archivos"
+  fi
+  d=${root:-$PWD}
+
+  local -a found
+  for f in package.json vercel.json .vercel/project.json netlify.toml fly.toml wrangler.toml wrangler.jsonc \
+           railway.json railway.toml Dockerfile docker-compose.yml docker-compose.yaml compose.yml compose.yaml \
+           Makefile justfile Procfile ecosystem.config.js supabase/config.toml composer.json artisan \
+           pyproject.toml requirements.txt Gemfile go.mod Cargo.toml mise.toml .tool-versions \
+           next.config.js next.config.mjs next.config.ts astro.config.mjs vite.config.ts vite.config.js \
+           .github/workflows k8s kubernetes helm .env .env.local .env.production; do
+    [[ -e $d/$f ]] && found+=$f
+  done
+  (( ${#found} )) && print -r -- "- Archivos del proyecto: ${(j:, :)found}"
+
+  if [[ -f $d/package.json ]] && (( $+commands[jq] )); then
+    name=$(jq -r '.name // empty' $d/package.json 2>/dev/null)
+    local scripts=$(jq -r '(.scripts // {}) | to_entries | map("\(.key)=\(.value|tostring|.[0:60])") | join(" | ")' $d/package.json 2>/dev/null)
+    [[ -n $name ]] && print -r -- "- package.json name: $name"
+    [[ -n $scripts ]] && print -r -- "- Scripts npm: $scripts"
+    local pm=npm
+    [[ -f $d/pnpm-lock.yaml ]] && pm=pnpm; [[ -f $d/bun.lockb || -f $d/bun.lock ]] && pm=bun; [[ -f $d/yarn.lock ]] && pm=yarn
+    print -r -- "- Gestor de paquetes: $pm"
+  fi
+  if [[ -f $d/.vercel/project.json ]] && (( $+commands[jq] )); then
+    print -r -- "- Proyecto Vercel enlazado: $(jq -r '.projectName // .projectId' $d/.vercel/project.json 2>/dev/null)"
+  fi
+  if [[ -f $d/Makefile ]]; then
+    local targets=$(grep -oE '^[A-Za-z0-9_.-]+:' $d/Makefile | tr -d ':' | grep -v '^\.' | head -20 | tr '\n' ' ')
+    [[ -n $targets ]] && print -r -- "- Objetivos make: $targets"
+  fi
+  if [[ -d $d/.github/workflows ]]; then
+    print -r -- "- Workflows CI: $(command ls $d/.github/workflows | head -10 | tr '\n' ' ')"
+  fi
+
+  local -a clis
+  for f in vercel gh docker kubectl helm fly flyctl wrangler netlify railway supabase aws gcloud az doctl \
+           heroku firebase pm2 ssh rsync scp terraform ansible mise brew node pnpm bun yarn npm python3 uv \
+           php composer jq yq xh http httpie curl wget nc nmap dig mtr htop btop lazygit lazydocker eza bat fd rg fzf; do
+    (( $+commands[$f] )) && clis+=$f
+  done
+  print -r -- "- CLIs instaladas: ${(j: :)clis}"
+
+  local -a hosts
+  hosts=( ${(f)"$(cat $HOME/.ssh/config $HOME/.ssh/config.d/*(N) 2>/dev/null | awk 'tolower($1)=="host"{for(i=2;i<=NF;i++) if($i!~/[*?!]/) print $i}')"} )
+  (( ${#hosts} )) && print -r -- "- Hosts SSH configurados: ${(j: :)hosts[1,30]}"
+
+  if [[ -s $NOTES ]]; then
+    print -r -- "- Notas del usuario (servidores, dominios, costumbres):"
+    grep -v '^[[:space:]]*<!--' $NOTES | sed 's/[[:space:]]*-->[[:space:]]*$//' | grep -v '^[[:space:]]*$' | head -60 | sed 's/^/    /'
+  fi
+  if [[ -f $d/.dime.md ]]; then
+    print -r -- "- Notas de este proyecto (.dime.md):"
+    head -60 $d/.dime.md | sed 's/^/    /'
+  fi
+}
+
+SYSTEM_PROMPT='Eres «dime», un traductor de peticiones en lenguaje natural (normalmente en español) a comandos de terminal listos para pegar en zsh sobre macOS. El usuario es desarrollador y gestiona despliegues (Vercel, Docker, SSH, GitHub, Supabase, Railway…), servidores y proyectos web.
+
+Formato EXACTO de la respuesta, sin nada más: primero el comando tal cual, después una línea con tres guiones (---) y después una explicación en español de máximo 10 palabras. Ejemplo de respuesta completa:
+curl -sS -o /dev/null -w "%{http_code}\n" https://ejemplo.com
+---
+Muestra el código HTTP que devuelve ejemplo.com
+
+Reglas:
+- Nada de markdown, backticks, «$ » ni texto antes del comando.
+- Una sola línea siempre que se pueda; encadena pasos con && o tuberías. Solo usa varias líneas si es imprescindible.
+- Usa el contexto: nombres reales del proyecto, scripts npm, gestor de paquetes, hosts SSH, CLIs instaladas. Prefiere herramientas que ya estén instaladas.
+- Utilidades BSD de macOS (sed -i "", date -v, etc.). Para HTTP usa curl salvo que se pida otra cosa.
+- Si falta un dato (token, IP, nombre), pon un marcador evidente como <TOKEN> o <IP>; nunca inventes secretos.
+- Prefiere la variante segura y verificable (dry-run, -n, --preview, códigos de estado visibles). No añadas sudo si no hace falta.
+- Si la petición ya es un comando, corrígelo o mejóralo según lo que se pida.
+- Si no tiene sentido como comando, responde una línea que empiece por "# " con el motivo, luego --- y la explicación.'
+
+build_prompt() {
+  local req=$1
+  print -r -- "Contexto del entorno:"
+  gather_context
+  print
+  if [[ -n $DIME_PREV ]]; then
+    print -r -- "Propuestas que el usuario YA HA DESCARTADO (prohibido repetirlas, ni siquiera con cambios mínimos de flags):"
+    print -r -- "$DIME_PREV" | sed 's/^/  ✗ /'
+    print
+    print -r -- "Petición: $req"
+    print -r -- "Da una ALTERNATIVA claramente distinta: otra herramienta (p. ej. lsof → netstat/ps/nc, curl → xh/httpie/wget), otro enfoque o una versión más completa que aporte más información."
+    return
+  fi
+  print -r -- "Petición: $req"
+}
+
+# Ejecuta un comando con límite de tiempo (macOS no trae timeout)
+with_timeout() { perl -e 'alarm shift; exec @ARGV or exit 127' "$DIME_TIMEOUT" "$@" }
+
+run_claude() {  # $1 = prompt
+  [[ -x $CLAUDE_BIN ]] || { print -u2 "claude no está instalado"; return 127 }
+  ( cd $DIME_DIR && with_timeout $CLAUDE_BIN -p --model $DIME_CLAUDE_MODEL --tools "" --strict-mcp-config \
+      --setting-sources "" --disable-slash-commands --no-session-persistence \
+      --system-prompt "$SYSTEM_PROMPT" "$1" </dev/null )
+}
+
+run_codex() {  # $1 = prompt
+  [[ -x $CODEX_BIN ]] || { print -u2 "codex no está instalado"; return 127 }
+  local out=$(mktemp -t dime) rc
+  ( cd $DIME_DIR && with_timeout $CODEX_BIN exec --ephemeral --ignore-user-config --ignore-rules --skip-git-repo-check \
+      -s read-only -m $DIME_CODEX_MODEL -c "model_reasoning_effort=\"$DIME_CODEX_EFFORT\"" \
+      -o $out "$SYSTEM_PROMPT"$'\n\n'"$1" </dev/null >/dev/null 2>$out.err )
+  rc=$?
+  if (( rc == 0 )) && [[ -s $out ]]; then cat $out; else tail -3 $out.err >&2; (( rc )) || rc=1; fi
+  rm -f $out $out.err
+  return $rc
+}
+
+# Separa la respuesta en comando y explicación, quitando restos de markdown
+parse_reply() {  # $1 = texto → globals CMD, EXPL
+  local text=$1 line in_expl=0
+  local -a cmd_lines expl_lines
+  for line in "${(@f)text}"; do
+    [[ $line == '```'* || $line == '<comando>' || $line == '</comando>' ]] && continue
+    if (( ! in_expl )) && [[ $line == ---* ]]; then in_expl=1; continue; fi
+    if (( in_expl )); then expl_lines+=$line; else cmd_lines+=$line; fi
+  done
+  # quita líneas vacías al principio y al final del comando
+  while (( ${#cmd_lines} )) && [[ -z ${cmd_lines[1]//[[:space:]]/} ]]; do shift cmd_lines; done
+  while (( ${#cmd_lines} )) && [[ -z ${cmd_lines[-1]//[[:space:]]/} ]]; do cmd_lines[-1]=(); done
+  CMD=${(F)cmd_lines}
+  CMD=${CMD#\$ }
+  CMD=${CMD##[[:space:]]#}; CMD=${CMD%%[[:space:]]#}
+  [[ $CMD == \`*\` ]] && CMD=${${CMD#\`}%\`}
+  EXPL=${(j: :)${expl_lines:#}}
+  EXPL=${EXPL##[[:space:]]#}
+}
+
+# Avisos locales para comandos peligrosos o de producción (no dependen del modelo)
+danger_note() {
+  local c=$1
+  if [[ $c == *(rm\ -rf|rm\ -fr|rm\ -r\ |mkfs|dd\ if=|diskutil\ erase|\>\ /dev/disk|chmod\ -R\ 777|DROP\ TABLE|DROP\ DATABASE|TRUNCATE|--force-with-lease|push\ --force|push\ -f|reset\ --hard|clean\ -fd|docker\ system\ prune|volume\ rm|kubectl\ delete|terraform\ destroy|vercel\ remove|vercel\ rm|killall|kill\ -9)* ]]; then
+    print -r -- "⚠️  destructivo, revísalo antes de pulsar Enter"
+  elif [[ $c == *(vercel(|\ *)\ --prod*|vercel\ promote|vercel\ rollback|vercel\ deploy\ --prod|deploy\ --prod|deploy\ prod|db\ push|migrate\ deploy|railway\ up|railway\ redeploy|fly\ deploy|flyctl\ deploy|wrangler\ deploy|wrangler\ publish|netlify\ deploy\ --prod|firebase\ deploy|kubectl\ apply|kubectl\ rollout|helm\ upgrade|helm\ install|terraform\ apply|npm\ publish|pnpm\ publish|git\ push\ origin\ main|git\ push\ origin\ master|docker\ push)* ]]; then
+    print -r -- "🚀 afecta a producción, revísalo"
+  elif [[ $c == *sudo\ * ]]; then
+    print -r -- "🔐 usa sudo"
+  fi
+}
+
+translate() {  # $1 = petición → imprime comando (stdout) y explicación en EXPL / BACKEND_USED
+  local req=$1 prompt reply rc t0=$EPOCHREALTIME backend=$DIME_BACKEND other ERRF=$(mktemp -t dime-err)
+  prompt=$(build_prompt "$req")
+  [[ $backend == codex ]] && other=claude || { backend=claude; other=codex }
+
+  reply=$(run_$backend "$prompt" 2>$ERRF); rc=$?
+  if (( rc != 0 )) || [[ -z ${reply//[[:space:]]/} ]]; then
+    local err=$(tail -1 $ERRF 2>/dev/null)
+    (( rc == 142 )) && err="tiempo agotado (${DIME_TIMEOUT}s)"
+    if (( DIME_FALLBACK )); then
+      print -r -- "$(date '+%F %T') FALLO $backend rc=$rc ${err}" >> $LOG
+      FALLBACK_REASON="$backend falló${err:+: $err}"
+      backend=$other
+      reply=$(run_$backend "$prompt" 2>$ERRF); rc=$?
+    fi
+  fi
+  if (( rc != 0 )) || [[ -z ${reply//[[:space:]]/} ]]; then
+    local err=$(tail -1 $ERRF 2>/dev/null)
+    (( rc == 142 )) && err="tiempo agotado (${DIME_TIMEOUT}s)"
+    rm -f $ERRF
+    print -r -- "$(date '+%F %T') FALLO $backend rc=$rc ${err} :: $req" >> $LOG
+    ERROR="no he podido generar el comando ($backend${err:+: $err})"
+    return 1
+  fi
+  rm -f $ERRF
+  parse_reply "$reply"
+  BACKEND_USED=$backend
+  ELAPSED=$(printf '%.1f' $(( EPOCHREALTIME - t0 )))
+  { print -r -- "$(date '+%F %T') $backend ${ELAPSED}s [$PWD] $req"; print -r -- "    → ${CMD//$'\n'/ ⏎ }"; } >> $LOG
+  [[ -n $CMD ]] || { ERROR="respuesta vacía"; return 1 }
+}
+
+usage() {
+  sed -n '2,13p' $0 | sed 's/^# \{0,1\}//'
+}
+
+status_line() {
+  if [[ -e $OFF_FLAG ]]; then print "desactivado"; else print "activado"; fi
+}
+
+case $1 in
+  on|activar)     rm -f $OFF_FLAG; refresh_swiftbar; print "dime: activado"; exit 0 ;;
+  off|desactivar) touch $OFF_FLAG; refresh_swiftbar; print "dime: desactivado"; exit 0 ;;
+  toggle)         if [[ -e $OFF_FLAG ]]; then rm -f $OFF_FLAG; else touch $OFF_FLAG; fi; refresh_swiftbar; print "dime: $(status_line)"; exit 0 ;;
+  status|estado)  print "dime: $(status_line) · motor $DIME_BACKEND (claude=$DIME_CLAUDE_MODEL, codex=$DIME_CODEX_MODEL)"; exit 0 ;;
+  is-on)          [[ ! -e $OFF_FLAG ]]; exit $? ;;
+  backend|motor)
+    [[ $2 == (claude|codex) ]] || { print -u2 "uso: dime backend claude|codex"; exit 2 }
+    set_config DIME_BACKEND $2; refresh_swiftbar; print "dime: motor → $2"; exit 0 ;;
+  contexto|context)
+    [[ -f $NOTES ]] || cp ${0:A:h}/contexto.ejemplo.md $NOTES 2>/dev/null || touch $NOTES
+    ${VISUAL:-${EDITOR:-open -t}} $NOTES; exit 0 ;;
+  log)            touch $LOG; tail -40 $LOG; exit 0 ;;
+  -h|--help|help|"") usage; exit 0 ;;
+  --zle)
+    # Modo widget: stdout = comando; stderr = mensaje para mostrar bajo la línea
+    shift; [[ $1 == -- ]] && shift
+    if ! translate "$*"; then print -u2 -r -- "dime: $ERROR"; exit 1; fi
+    print -r -- "$CMD"
+    local note=$(danger_note "$CMD")
+    print -u2 -r -- "✨ ${EXPL:-listo}  · ${BACKEND_USED} ${ELAPSED}s${FALLBACK_REASON:+ (respaldo: $FALLBACK_REASON)}${note:+${NL}$note}"
+    exit 0 ;;
+esac
+
+# Modo CLI
+local copy=0
+[[ $1 == (-c|--copy) ]] && { copy=1; shift }
+[[ $1 == -- ]] && shift
+if ! translate "$*"; then print -u2 -r -- "dime: $ERROR"; exit 1; fi
+print -r -- "$CMD"
+[[ -t 2 ]] && print -u2 -P -r -- "%F{8}${EXPL} · ${BACKEND_USED} ${ELAPSED}s%f"
+note=$(danger_note "$CMD"); [[ -n $note ]] && print -u2 -r -- "$note"
+(( copy )) && print -rn -- "$CMD" | pbcopy
+exit 0
